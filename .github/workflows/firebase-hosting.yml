@@ -1,0 +1,29 @@
+name: Deploy to Firebase Hosting
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # PRs from forks have no access to secrets
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          # Use the repo variable if set, otherwise the project_id inside the service account key
+          projectId: ${{ vars.FIREBASE_PROJECT_ID || fromJSON(secrets.FIREBASE_SERVICE_ACCOUNT).project_id }}
+          # Push to main / manual run -> live site; pull request -> preview URL (empty channelId)
+          channelId: ${{ github.event_name != 'pull_request' && 'live' || '' }}

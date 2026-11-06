@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hello Firebase – Login Demo</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: grid; place-items: center;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: linear-gradient(135deg, #ffca28, #ff7043); color: #222;
+    }
+    main { background: rgba(255,255,255,.95); padding: 2rem; border-radius: 16px;
+           width: min(380px, calc(100% - 32px)); box-shadow: 0 10px 30px rgba(0,0,0,.15); }
+    h1 { margin: 0 0 .25rem; text-align: center; }
+    .sub { text-align: center; color: #555; margin: 0 0 1.5rem; }
+    label { display: block; font-size: .9rem; margin: .75rem 0 .25rem; }
+    input { width: 100%; padding: .7rem; border: 1px solid #ccc; border-radius: 8px; font-size: 1rem; }
+    button { width: 100%; padding: .75rem; margin-top: .75rem; border: 0; border-radius: 8px;
+             font-size: 1rem; cursor: pointer; background: #ff7043; color: #fff; font-weight: 600; }
+    button.secondary { background: #fff; color: #333; border: 1px solid #ccc; }
+    button:disabled { opacity: .6; cursor: default; }
+    .row { display: flex; gap: .5rem; }
+    .divider { text-align: center; color: #888; margin: 1rem 0 0; font-size: .85rem; }
+    .msg { margin-top: 1rem; font-size: .9rem; min-height: 1.2em; }
+    .msg.error { color: #c62828; }
+    .msg.ok { color: #2e7d32; }
+    .profile { text-align: center; }
+    .profile img { width: 72px; height: 72px; border-radius: 50%; }
+    .profile code { font-size: .75rem; word-break: break-all; color: #666; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>👋 Hello World!</h1>
+    <p class="sub">Login-Demo mit Firebase Auth</p>
+
+    <p id="loading" class="sub">Lade…</p>
+
+    <!-- Logged out -->
+    <form id="login-form" hidden>
+      <label for="email">E-Mail</label>
+      <input id="email" type="email" autocomplete="email" required>
+      <label for="password">Passwort (min. 6 Zeichen)</label>
+      <input id="password" type="password" autocomplete="current-password" minlength="6" required>
+      <div class="row">
+        <button type="submit" id="btn-login">Anmelden</button>
+        <button type="button" id="btn-register" class="secondary">Registrieren</button>
+      </div>
+      <p class="divider">oder</p>
+      <button type="button" id="btn-google" class="secondary">Mit Google anmelden</button>
+    </form>
+
+    <!-- Logged in -->
+    <section id="profile" class="profile" hidden>
+      <img id="avatar" alt="" hidden>
+      <h2 id="welcome"></h2>
+      <p id="user-email"></p>
+      <p><code id="uid"></code></p>
+      <button type="button" id="btn-logout">Abmelden</button>
+    </section>
+
+    <p id="msg" class="msg"></p>
+  </main>
+
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js';
+    import {
+      getAuth, onAuthStateChanged, signInWithEmailAndPassword,
+      createUserWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, signOut
+    } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js';
+
+    const $ = (id) => document.getElementById(id);
+    const msg = (text, type = '') => { $('msg').textContent = text; $('msg').className = 'msg ' + type; };
+
+    const ERRORS = {
+      'auth/invalid-credential': 'E-Mail oder Passwort falsch.',
+      'auth/email-already-in-use': 'Diese E-Mail ist schon registriert.',
+      'auth/weak-password': 'Passwort zu schwach (min. 6 Zeichen).',
+      'auth/invalid-email': 'Ungültige E-Mail-Adresse.',
+      'auth/operation-not-allowed': 'Diese Anmeldemethode ist in der Firebase Console nicht aktiviert.',
+      'auth/unauthorized-domain': 'Diese Domain ist nicht für Google-Login freigegeben (Firebase Console → Authentication → Einstellungen → Autorisierte Domains).',
+      'auth/popup-closed-by-user': 'Popup wurde geschlossen.',
+      'auth/configuration-not-found': 'Firebase Authentication ist im Projekt noch nicht eingerichtet.',
+    };
+    const showError = (e) => msg(ERRORS[e.code] || e.message, 'error');
+
+    // Firebase Hosting serves the web app config at this reserved URL – no keys in the code.
+    let auth;
+    try {
+      const res = await fetch('/__/firebase/init.json');
+      if (!res.ok) throw new Error('init.json ' + res.status);
+      auth = getAuth(initializeApp(await res.json()));
+    } catch (e) {
+      $('loading').hidden = true;
+      msg('Firebase-Konfiguration nicht gefunden. Ist im Projekt eine Web-App registriert?', 'error');
+      throw e;
+    }
+
+    onAuthStateChanged(auth, (user) => {
+      $('loading').hidden = true;
+      $('login-form').hidden = !!user;
+      $('profile').hidden = !user;
+      if (user) {
+        $('welcome').textContent = 'Hallo ' + (user.displayName || user.email.split('@')[0]) + '!';
+        $('user-email').textContent = user.email;
+        $('uid').textContent = 'UID: ' + user.uid;
+        $('avatar').hidden = !user.photoURL;
+        if (user.photoURL) $('avatar').src = user.photoURL;
+      }
+    });
+
+    const creds = () => [$('email').value.trim(), $('password').value];
+    const run = async (fn, okText) => {
+      msg('');
+      document.querySelectorAll('button').forEach(b => b.disabled = true);
+      try { await fn(); if (okText) msg(okText, 'ok'); }
+      catch (e) { showError(e); }
+      finally { document.querySelectorAll('button').forEach(b => b.disabled = false); }
+    };
+
+    $('login-form').addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      run(() => signInWithEmailAndPassword(auth, ...creds()), 'Angemeldet.');
+    });
+    $('btn-register').addEventListener('click', () => {
+      if (!$('login-form').reportValidity()) return;
+      run(() => createUserWithEmailAndPassword(auth, ...creds()), 'Konto erstellt und angemeldet.');
+    });
+    $('btn-google').addEventListener('click', () =>
+      run(() => signInWithPopup(auth, new GoogleAuthProvider()), 'Mit Google angemeldet.'));
+    $('btn-logout').addEventListener('click', () =>
+      run(() => signOut(auth), 'Abgemeldet.'));
+  </script>
+</body>
+</html>
