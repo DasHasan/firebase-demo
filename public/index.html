@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Hello Firebase – Login Demo</title>
+  <title>Hello Firebase – Login &amp; Notizen</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -29,13 +29,23 @@
     .profile { text-align: center; }
     .profile img { width: 72px; height: 72px; border-radius: 50%; }
     .profile code { font-size: .75rem; word-break: break-all; color: #666; }
+    .notes { text-align: left; margin-top: 1.5rem; border-top: 1px solid #eee; padding-top: 1rem; }
+    .notes h3 { margin: 0 0 .5rem; }
+    .notes form { display: flex; gap: .5rem; }
+    .notes form button { width: auto; margin-top: 0; padding: .7rem 1rem; }
+    .notes ul { list-style: none; padding: 0; margin: 1rem 0 0; }
+    .notes li { display: flex; align-items: center; gap: .5rem; padding: .5rem 0; border-bottom: 1px solid #f0f0f0; }
+    .notes li span { flex: 1; word-break: break-word; }
+    .notes li time { font-size: .75rem; color: #888; }
+    .notes li button { width: auto; margin: 0; padding: .25rem .6rem; background: transparent; color: #c62828; font-size: 1.1rem; }
+    .empty { color: #888; font-size: .9rem; }
     [hidden] { display: none !important; }
   </style>
 </head>
 <body>
   <main>
     <h1>👋 Hello World!</h1>
-    <p class="sub">Login-Demo mit Firebase Auth</p>
+    <p class="sub">Login mit Firebase Auth, Notizen in Firestore</p>
 
     <p id="loading" class="sub">Lade…</p>
 
@@ -59,7 +69,17 @@
       <h2 id="welcome"></h2>
       <p id="user-email"></p>
       <p><code id="uid"></code></p>
-      <button type="button" id="btn-logout">Abmelden</button>
+      <button type="button" id="btn-logout" class="secondary">Abmelden</button>
+
+      <div class="notes">
+        <h3>📝 Meine Notizen</h3>
+        <form id="note-form">
+          <input id="note-text" maxlength="500" placeholder="Neue Notiz…" required>
+          <button type="submit">+</button>
+        </form>
+        <ul id="note-list"></ul>
+        <p id="note-empty" class="empty" hidden>Noch keine Notizen.</p>
+      </div>
     </section>
 
     <p id="msg" class="msg"></p>
@@ -71,6 +91,10 @@
       getAuth, onAuthStateChanged, signInWithEmailAndPassword,
       createUserWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, signOut
     } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js';
+    import {
+      getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot,
+      query, orderBy, serverTimestamp
+    } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js';
 
     const $ = (id) => document.getElementById(id);
     const msg = (text, type = '') => { $('msg').textContent = text; $('msg').className = 'msg ' + type; };
@@ -84,23 +108,56 @@
       'auth/unauthorized-domain': 'Diese Domain ist nicht für Google-Login freigegeben (Firebase Console → Authentication → Einstellungen → Autorisierte Domains).',
       'auth/popup-closed-by-user': 'Popup wurde geschlossen.',
       'auth/configuration-not-found': 'Firebase Authentication ist im Projekt noch nicht eingerichtet.',
+      'permission-denied': 'Keine Berechtigung (Firestore-Regeln).',
+      'not-found': 'Firestore-Datenbank existiert noch nicht.',
     };
     const showError = (e) => msg(ERRORS[e.code] || e.message, 'error');
 
     // Firebase Hosting serves the web app config at this reserved URL – no keys in the code.
-    let auth;
+    let auth, db;
     try {
       const res = await fetch('/__/firebase/init.json');
       if (!res.ok) throw new Error('init.json ' + res.status);
-      auth = getAuth(initializeApp(await res.json()));
+      const app = initializeApp(await res.json());
+      auth = getAuth(app);
+      db = getFirestore(app);
     } catch (e) {
       $('loading').hidden = true;
       msg('Firebase-Konfiguration nicht gefunden. Ist im Projekt eine Web-App registriert?', 'error');
       throw e;
     }
 
+    // Live list of the signed-in user's notes: users/{uid}/notes
+    let unsubscribeNotes = null;
+    let notesRef = null;
+    const renderNotes = (snap) => {
+      const list = $('note-list');
+      list.replaceChildren();
+      $('note-empty').hidden = !snap.empty;
+      snap.forEach((d) => {
+        const li = document.createElement('li');
+        const text = document.createElement('span');
+        text.textContent = d.data().text;
+        const time = document.createElement('time');
+        const ts = d.data({ serverTimestamps: 'estimate' }).createdAt;
+        if (ts) time.textContent = ts.toDate().toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' });
+        const del = document.createElement('button');
+        del.type = 'button'; del.title = 'Löschen'; del.textContent = '🗑';
+        del.addEventListener('click', () => deleteDoc(doc(notesRef, d.id)).catch(showError));
+        li.append(text, time, del);
+        list.append(li);
+      });
+    };
+
     onAuthStateChanged(auth, (user) => {
       $('loading').hidden = true;
+      if (unsubscribeNotes) { unsubscribeNotes(); unsubscribeNotes = null; }
+      if (user) {
+        notesRef = collection(db, 'users', user.uid, 'notes');
+        unsubscribeNotes = onSnapshot(query(notesRef, orderBy('createdAt', 'desc')), renderNotes, showError);
+      } else {
+        $('note-list').replaceChildren();
+      }
       $('login-form').hidden = !!user;
       $('profile').hidden = !user;
       if (user) {
@@ -131,6 +188,14 @@
     });
     $('btn-google').addEventListener('click', () =>
       run(() => signInWithPopup(auth, new GoogleAuthProvider()), 'Mit Google angemeldet.'));
+    $('note-form').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const text = $('note-text').value.trim();
+      if (!text) return;
+      $('note-text').value = '';
+      try { await addDoc(notesRef, { text, createdAt: serverTimestamp() }); }
+      catch (e) { $('note-text').value = text; showError(e); }
+    });
     $('btn-logout').addEventListener('click', () =>
       run(() => signOut(auth), 'Abgemeldet.'));
   </script>

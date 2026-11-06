@@ -12,3 +12,10 @@ Benötigt im Repo (Settings → Secrets and variables → Actions):
 |----------|----------------------------|------------------------------------------|
 | Secret   | `FIREBASE_SERVICE_ACCOUNT` | kompletter JSON-Key eines Service-Accounts |
 | Variable | `FIREBASE_PROJECT_ID`      | optional – sonst wird `project_id` aus dem Key genutzt |
+
+## Firestore
+
+Angemeldete Nutzer speichern Notizen unter `users/{uid}/notes`. Die Regeln in `firestore.rules`
+erlauben jedem nur Zugriff auf die eigenen Notizen. Sie werden bei jedem Push auf `main`
+deployed (Job `firestore-rules`). Dafür braucht der Service-Account zusätzlich die Rolle
+**Firebase Rules Admin**.
