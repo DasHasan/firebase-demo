@@ -27,3 +27,19 @@ jobs:
           projectId: ${{ vars.FIREBASE_PROJECT_ID || fromJSON(secrets.FIREBASE_SERVICE_ACCOUNT).project_id }}
           # Push to main / manual run -> live site; pull request -> preview URL (empty channelId)
           channelId: ${{ github.event_name != 'pull_request' && 'live' || '' }}
+
+  firestore-rules:
+    # Rules apply to the shared database (preview and live), so only deploy them from main
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+      - name: Deploy Firestore security rules
+        run: npx --yes firebase-tools@latest deploy --only firestore:rules --non-interactive --project "$PROJECT_ID"
+        env:
+          PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID || fromJSON(secrets.FIREBASE_SERVICE_ACCOUNT).project_id }}
