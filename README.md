@@ -11,4 +11,4 @@ Benötigt im Repo (Settings → Secrets and variables → Actions):
 | Typ      | Name                       | Inhalt                                   |
 |----------|----------------------------|------------------------------------------|
 | Secret   | `FIREBASE_SERVICE_ACCOUNT` | kompletter JSON-Key eines Service-Accounts |
-| Variable | `FIREBASE_PROJECT_ID`      | Firebase-Projekt-ID, z. B. `my-demo-1234` |
+| Variable | `FIREBASE_PROJECT_ID`      | optional – sonst wird `project_id` aus dem Key genutzt |
