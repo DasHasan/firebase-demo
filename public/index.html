@@ -39,6 +39,18 @@
     .notes li time { font-size: .75rem; color: #888; }
     .notes li button { width: auto; margin: 0; padding: .25rem .6rem; background: transparent; color: #c62828; font-size: 1.1rem; }
     .empty { color: #888; font-size: .9rem; }
+    main.wide { width: min(720px, calc(100% - 32px)); }
+    .info { text-align: left; margin-top: 1.5rem; border-top: 1px solid #eee; padding-top: 1rem; }
+    .info h3 { margin: 0 0 .5rem; }
+    .info details { margin: .5rem 0; border: 1px solid #eee; border-radius: 8px; padding: .5rem .75rem; }
+    .info summary { cursor: pointer; font-weight: 600; }
+    .info .hint { font-size: .8rem; color: #888; margin: .25rem 0; }
+    .info table { width: 100%; border-collapse: collapse; font-size: .8rem; margin-top: .5rem; }
+    .info td { padding: .3rem .25rem; border-bottom: 1px solid #f3f3f3; vertical-align: top; word-break: break-all; }
+    .info td:first-child { color: #666; white-space: nowrap; word-break: normal; padding-right: .75rem; }
+    .info pre { font-size: .72rem; background: #f7f7f7; border-radius: 6px; padding: .5rem;
+                white-space: pre-wrap; word-break: break-all; margin: .5rem 0 0; max-height: 360px; overflow: auto; }
+    .warn { color: #c62828; font-size: .8rem; }
     [hidden] { display: none !important; }
   </style>
 </head>
@@ -68,6 +80,35 @@
       <p><code id="uid"></code></p>
       <button type="button" id="btn-logout" class="secondary">Abmelden</button>
 
+      <div class="info">
+        <h3>🔍 Login-Informationen</h3>
+        <details open>
+          <summary>Firebase-Nutzer</summary>
+          <table id="info-user"></table>
+        </details>
+        <details>
+          <summary>Verknüpfte Anbieter (providerData)</summary>
+          <pre id="info-providers"></pre>
+        </details>
+        <details>
+          <summary>ID-Token Claims (Firebase)</summary>
+          <table id="info-token"></table>
+          <pre id="info-claims"></pre>
+        </details>
+        <details>
+          <summary>OAuth-Antwort des Anbieters (Google)</summary>
+          <p class="hint">Nur direkt nach dem Login verfügbar – nach einem Neuladen der Seite liefert Firebase diese Daten nicht mehr.</p>
+          <pre id="info-oauth"></pre>
+        </details>
+        <details>
+          <summary>Rohdaten (user.toJSON) inkl. Tokens</summary>
+          <p class="warn">Enthält Zugangs- und Refresh-Tokens – keine Screenshots teilen.</p>
+          <pre id="info-raw"></pre>
+          <p class="warn">Raw ID-Token (JWT):</p>
+          <pre id="info-jwt"></pre>
+        </details>
+      </div>
+
       <div class="notes">
         <h3>📝 Meine Notizen</h3>
         <form id="note-form">
@@ -86,7 +127,7 @@
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js';
     import {
       getAuth, onAuthStateChanged, signInWithEmailAndPassword,
-      signInWithPopup, GoogleAuthProvider, signOut
+      signInWithPopup, GoogleAuthProvider, signOut, getAdditionalUserInfo
     } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js';
     import {
       getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot,
@@ -169,30 +210,99 @@
       $('login-form').hidden = !!user;
       $('profile').hidden = !user;
       if (user) {
-        $('welcome').textContent = 'Hallo ' + (user.displayName || user.email.split('@')[0]) + '!';
-        $('user-email').textContent = user.email;
+        $('welcome').textContent = 'Hallo ' + (user.displayName || (user.email || '').split('@')[0] || 'du') + '!';
+        $('user-email').textContent = user.email || '';
         $('uid').textContent = 'UID: ' + user.uid;
         $('avatar').hidden = !user.photoURL;
         if (user.photoURL) $('avatar').src = user.photoURL;
+        renderAuthInfo(user);
       }
+      document.querySelector('main').classList.toggle('wide', !!user);
     });
+
+    // ---- Everything Firebase / the OAuth provider hands us about the login ----
+    let lastSignIn = null; // result of the most recent signIn call (only in memory)
+
+    const fmt = (v) => v === null || v === undefined ? '—'
+      : typeof v === 'object' ? JSON.stringify(v) : String(v);
+    const fillTable = (el, rows) => {
+      el.replaceChildren(...Object.entries(rows).map(([k, v]) => {
+        const tr = document.createElement('tr');
+        const a = document.createElement('td'); a.textContent = k;
+        const b = document.createElement('td'); b.textContent = fmt(v);
+        tr.append(a, b);
+        return tr;
+      }));
+    };
+    const json = (v) => JSON.stringify(v, null, 2);
+    const unixToDate = (n) => n ? new Date(n * 1000).toLocaleString('de-DE') + ` (${n})` : n;
+
+    async function renderAuthInfo(user) {
+      fillTable($('info-user'), {
+        uid: user.uid,
+        email: user.email,
+        emailVerified: user.emailVerified,
+        displayName: user.displayName,
+        photoURL: user.photoURL,
+        phoneNumber: user.phoneNumber,
+        isAnonymous: user.isAnonymous,
+        providerId: user.providerId,
+        tenantId: user.tenantId,
+        'metadata.creationTime': user.metadata.creationTime,
+        'metadata.lastSignInTime': user.metadata.lastSignInTime,
+      });
+      $('info-providers').textContent = json(user.providerData);
+      $('info-raw').textContent = json(user.toJSON());
+
+      try {
+        const t = await user.getIdTokenResult();
+        fillTable($('info-token'), {
+          signInProvider: t.signInProvider,
+          signInSecondFactor: t.signInSecondFactor,
+          authTime: t.authTime,
+          issuedAtTime: t.issuedAtTime,
+          expirationTime: t.expirationTime,
+        });
+        const c = { ...t.claims };
+        for (const k of ['auth_time', 'iat', 'exp']) if (c[k]) c[k] = unixToDate(c[k]);
+        $('info-claims').textContent = json(c);
+        $('info-jwt').textContent = t.token;
+      } catch (e) { $('info-claims').textContent = 'Fehler: ' + e.message; }
+
+      if (lastSignIn && lastSignIn.user.uid === user.uid) {
+        const extra = getAdditionalUserInfo(lastSignIn);
+        const cred = GoogleAuthProvider.credentialFromResult(lastSignIn);
+        $('info-oauth').textContent = json({
+          additionalUserInfo: extra,
+          credential: cred && cred.toJSON(),
+          operationType: lastSignIn.operationType,
+          providerId: lastSignIn.providerId,
+        });
+      } else {
+        $('info-oauth').textContent = 'Keine Daten – melde dich ab und erneut an, um sie zu sehen.';
+      }
+    }
 
     const creds = () => [$('email').value.trim(), $('password').value];
     const run = async (fn, okText) => {
       msg('');
       denied = false;
       document.querySelectorAll('button').forEach(b => b.disabled = true);
-      try { await fn(); if (okText && !denied) msg(okText, 'ok'); }
+      try {
+        await fn();
+        if (okText && !denied) msg(okText, 'ok');
+        if (!denied && auth.currentUser) renderAuthInfo(auth.currentUser); // now with OAuth result
+      }
       catch (e) { showError(e); }
       finally { document.querySelectorAll('button').forEach(b => b.disabled = false); }
     };
 
     $('login-form').addEventListener('submit', (ev) => {
       ev.preventDefault();
-      run(() => signInWithEmailAndPassword(auth, ...creds()), 'Angemeldet.');
+      run(async () => { lastSignIn = await signInWithEmailAndPassword(auth, ...creds()); }, 'Angemeldet.');
     });
     $('btn-google').addEventListener('click', () =>
-      run(() => signInWithPopup(auth, new GoogleAuthProvider()), 'Mit Google angemeldet.'));
+      run(async () => { lastSignIn = await signInWithPopup(auth, new GoogleAuthProvider()); }, 'Mit Google angemeldet.'));
     $('note-form').addEventListener('submit', async (ev) => {
       ev.preventDefault();
       const text = $('note-text').value.trim();
