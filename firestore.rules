@@ -1,10 +1,14 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Each user can only read and write their own notes.
+    // Only the owner account may use this app.
+    function isOwner() {
+      return request.auth != null && request.auth.uid == 'maCaudCzxmU3fsKDwe22ujzLHKi1';
+    }
+
     match /users/{uid}/notes/{noteId} {
-      allow read, delete: if request.auth != null && request.auth.uid == uid;
-      allow create: if request.auth != null && request.auth.uid == uid
+      allow read, delete: if isOwner() && request.auth.uid == uid;
+      allow create: if isOwner() && request.auth.uid == uid
         && request.resource.data.keys().hasOnly(['text', 'createdAt'])
         && request.resource.data.text is string
         && request.resource.data.text.size() > 0
