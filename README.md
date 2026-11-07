@@ -16,6 +16,6 @@ Benötigt im Repo (Settings → Secrets and variables → Actions):
 ## Firestore
 
 Angemeldete Nutzer speichern Notizen unter `users/{uid}/notes`. Die Regeln in `firestore.rules`
-erlauben jedem nur Zugriff auf die eigenen Notizen. Sie werden bei jedem Push auf `main`
+erlauben nur dem Besitzer-Account (fest hinterlegte UID) Zugriff; die Seite meldet alle anderen sofort wieder ab. Registrierung ist in der Firebase Console deaktiviert. Sie werden bei jedem Push auf `main`
 deployed (Job `firestore-rules`). Dafür braucht der Service-Account zusätzlich die Rolle
 **Firebase Rules Admin**.

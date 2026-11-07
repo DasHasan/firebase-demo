@@ -55,10 +55,7 @@
       <input id="email" type="email" autocomplete="email" required>
       <label for="password">Passwort (min. 6 Zeichen)</label>
       <input id="password" type="password" autocomplete="current-password" minlength="6" required>
-      <div class="row">
-        <button type="submit" id="btn-login">Anmelden</button>
-        <button type="button" id="btn-register" class="secondary">Registrieren</button>
-      </div>
+      <button type="submit" id="btn-login">Anmelden</button>
       <p class="divider">oder</p>
       <button type="button" id="btn-google" class="secondary">Mit Google anmelden</button>
     </form>
@@ -89,7 +86,7 @@
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js';
     import {
       getAuth, onAuthStateChanged, signInWithEmailAndPassword,
-      createUserWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, signOut
+      signInWithPopup, GoogleAuthProvider, signOut
     } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js';
     import {
       getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot,
@@ -108,12 +105,17 @@
       'auth/unauthorized-domain': 'Diese Domain ist nicht für Google-Login freigegeben (Firebase Console → Authentication → Einstellungen → Autorisierte Domains).',
       'auth/popup-closed-by-user': 'Popup wurde geschlossen.',
       'auth/configuration-not-found': 'Firebase Authentication ist im Projekt noch nicht eingerichtet.',
+      'auth/admin-restricted-operation': 'Kein Zugriff – Registrierung ist deaktiviert.',
       'permission-denied': 'Keine Berechtigung (Firestore-Regeln).',
       'not-found': 'Firestore-Datenbank existiert noch nicht.',
     };
     const showError = (e) => msg(ERRORS[e.code] || e.message, 'error');
 
     // Firebase Hosting serves the web app config at this reserved URL – no keys in the code.
+    // Only this account may use the app. The real protection is in firestore.rules.
+    const OWNER_UID = 'maCaudCzxmU3fsKDwe22ujzLHKi1';
+    let denied = false;
+
     let auth, db;
     try {
       const res = await fetch('/__/firebase/init.json');
@@ -152,6 +154,12 @@
     onAuthStateChanged(auth, (user) => {
       $('loading').hidden = true;
       if (unsubscribeNotes) { unsubscribeNotes(); unsubscribeNotes = null; }
+      if (user && user.uid !== OWNER_UID) {
+        denied = true;
+        msg('Kein Zugriff – diese App ist privat.', 'error');
+        signOut(auth);
+        return;
+      }
       if (user) {
         notesRef = collection(db, 'users', user.uid, 'notes');
         unsubscribeNotes = onSnapshot(query(notesRef, orderBy('createdAt', 'desc')), renderNotes, showError);
@@ -172,8 +180,9 @@
     const creds = () => [$('email').value.trim(), $('password').value];
     const run = async (fn, okText) => {
       msg('');
+      denied = false;
       document.querySelectorAll('button').forEach(b => b.disabled = true);
-      try { await fn(); if (okText) msg(okText, 'ok'); }
+      try { await fn(); if (okText && !denied) msg(okText, 'ok'); }
       catch (e) { showError(e); }
       finally { document.querySelectorAll('button').forEach(b => b.disabled = false); }
     };
@@ -181,10 +190,6 @@
     $('login-form').addEventListener('submit', (ev) => {
       ev.preventDefault();
       run(() => signInWithEmailAndPassword(auth, ...creds()), 'Angemeldet.');
-    });
-    $('btn-register').addEventListener('click', () => {
-      if (!$('login-form').reportValidity()) return;
-      run(() => createUserWithEmailAndPassword(auth, ...creds()), 'Konto erstellt und angemeldet.');
     });
     $('btn-google').addEventListener('click', () =>
       run(() => signInWithPopup(auth, new GoogleAuthProvider()), 'Mit Google angemeldet.'));
